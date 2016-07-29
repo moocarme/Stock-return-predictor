@@ -18,10 +18,16 @@ library(rugarch)
 library(googletrend)
 library(gmailr)
 library(readr)
+library(syuzhet)
+
+# Get news and sentiment analysis from google news
+source('gNews-sentimentAnalysis.R')
 
 Ind1 <- read_csv('indices.csv')
 
-Ind1 <- Ind1[11:nrow(Ind1),]
+Ind1 <- Ind1[56:nrow(Ind1),]
+# Ind1 <- Ind1[1,]
+
 for(i in 1:nrow(Ind1)){
   indices = Ind1$index.1[i]
   keyword = Ind1$Company[i]
@@ -30,6 +36,7 @@ for(i in 1:nrow(Ind1)){
   gtrend2 <- gtrend[!is.na(gtrend[,1]),]
   gtrend2[,1] <-gtrend2[,1]+1 # adjust date to Monday
   if(is.null(gtrend)) next
+  
   windowLength = 200
   
   # Obtain the AAPL returns and truncate the NA value
@@ -46,6 +53,15 @@ for(i in 1:nrow(Ind1)){
   tot_df$index <-na.spline(tot_df$index)# spline gtrend data
   tot_df[tot_df$index<0] <- 0
   
+  # Google news
+  news <- getNews(indices,1000)
+  news_df <- data.frame(date = index(news), coredata(news))
+  score <- get_sentiment(as.character(news_df$Lead))
+  news_df$score <- score
+  news_df$date <- as.Date(news_df$date)
+  news_score <- news_df %>% dplyr::select(date, score)
+  tot_df <- tot_df %>% left_join(news_score, by= c('week' = 'date'))
+  tot_df$score[is.na(tot_df$score)] <- 0
   
   # Create the forecasts vector to store the predictions
   foreLength = length(spReturns) - windowLength
@@ -72,7 +88,7 @@ for(i in 1:nrow(Ind1)){
       }
       
       # Add xreg for googletrend/twitter
-      arimaFit = tryCatch( arima(spReturnsOffset, order=c(p, 0, q), xreg = tot_df$index),
+      arimaFit = tryCatch( arima(spReturnsOffset, order=c(p, 0, q), xreg = tot_df[c('index','score')]),
                            error=function( err ) FALSE,
                            warning=function( err ) FALSE )
       
@@ -119,8 +135,9 @@ for(i in 1:nrow(Ind1)){
   adstock <- (Ad(get(indices)))[(nrow(get(indices))-nrow(bsh1)+1):nrow(get(indices)),]
   
   out1 <- mutate(select(bsh1, date, ind), Adjusted.Stock = adstock)
-  write_csv(gtrend2, paste0('Output Files/', indices, '_gtrend.csv'))
-  write_csv(out1, paste0('Output Files/',indices, '_output.csv'))
+  # write_csv(gtrend2, paste0('Output Files/', indices, '_gtrend.csv'))
+  write_csv(news_df, paste0('Output Files/', indices, '_news.csv'))
+  write_csv(out1, paste0('Output Files/',indices, '_output_gtrend_gnews.csv'))
 }
 
 # # This section now in the app
